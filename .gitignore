@@ -1,0 +1,5 @@
+nimcache
+test/main
+*.exe
+build/
+example/build
