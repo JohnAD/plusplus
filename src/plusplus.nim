@@ -2,7 +2,8 @@ import
   options,
   macros,
   std / marshal,
-  std / httpcore
+  std / httpcore,
+  std / tables
 
 
 when defined(js):
@@ -43,14 +44,21 @@ else:
   #
 
 
-
-# Call
-#   Ident "body"
-#   ExprEqExpr
-#     Ident "onload"
-#     Ident "getInventory
+type
+  RoutePath = string
 
 
+type # TODO: make this compile-time for a map; fill it out with ROUTE
+  ApiCallDetail = object
+    path: RoutePath
+    objectName: string
+    httpMethod: string
+
+var getPlusPlusRouteDetails {.compileTime.} = initTable[string, ApiCallDetail]()
+
+#
+# STATIC WEB SITE THINGS
+#
 
 macro PAGE*(content: untyped): untyped =
   when defined(js):
@@ -110,55 +118,104 @@ macro CALLABLE*(content: untyped): untyped =
     result = quote do:
       proc `name`(): string = `nameStr` & "()"
 
-macro ROUTE*(routeMethod: HttpMethod, route: string, content: untyped): untyped =
-  # echo "R KIND=" & treeRepr(route)
-  echo "ROUTE=" & treeRepr(content)
+#
+# API SITE THINGS
+#
+
+macro ROUTE*(routeMethod: HttpMethod, route: RoutePath, content: untyped): untyped =
+  #
+  # route
+  #echo "ROUTE=" & treeRepr(content)
   if route.kind notin {nnkStrLit..nnkTripleStrLit, nnkSym}:
     error "ROUTE's route must be a string literal; recommend using PATH "
   let routeString = $route
+  #
+  # name
+  let procDef = content[0]
+  if procDef.kind != nnkProcDef:
+    error("A CALLABLE block must contain one proc and nothing else")
+  var nameNode = procDef[0]
+  if nameNode.kind == nnkPostFix: # is there a name* postfix?
+    nameNode = nameNode[1];       # move to the right child if so
+  let nameStr = $nameNode
+  #
+  # procname
+  let outerName = "outerjson_" & nameStr
+  let outerNameNode = newIdentNode(outerName)
+  echo "OUTER NAME=" & nameStr
+  #
+  # return type
+  let returnTypeNode = procDef[3]
+  var returnTypeIdent = procDef[3]
+  if returnTypeNode.kind == nnkFormalParams:
+    returnTypeIdent = returnTypeNode[0]
+  else:
+    error "ROUTE can't handle a missing return type...yet (TODO)"
+  #
+  # store in map
+  var details = ApiCallDetail()
+  details.path = routeString
+  details.objectName = $returnTypeIdent
+  details.httpMethod = routeMethod.strVal
+  getPlusPlusRouteDetails[nameStr] = details
+  #echo $getPlusPlusRouteDetails
+  #
+  # Act
   when defined(js):
     # `content`
     discard
   else:
-    let procDef = content[0]
-    if procDef.kind != nnkProcDef:
-      error("A CALLABLE block must contain one proc and nothing else")
-    #
-    var nameNode = procDef[0]
-    if nameNode.kind == nnkPostFix: # is there a name* postfix?
-      nameNode = nameNode[1];       # move to the right child if so
-    let nameStr = $nameNode
-    let outerName = "outerjson_" & nameStr
-    let outerNameNode = newIdentNode(outerName)
-    echo "OUTER NAME=" & nameStr
-    #
-    let returnTypeNode = procDef[3]
-    var returnTypeIdent = procDef[3]
-    if returnTypeNode.kind == nnkFormalParams:
-      returnTypeIdent = returnTypeNode[0]
-    else:
-      error "ROUTE can't handle a missing return type...yet (TODO)"
-    #
-    #proc `outerNameNode`(): `returnTypeIdent`:
     result = quote do:
       `content`
       proc `outerNameNode`(): string =
         let temp = `nameNode`()
         result = $$temp
 
+proc makeOfBranch(routeString: string): NimNode =
+  result = nnkOfBranch.newTree(
+    newIdentNode(routeString),
+    nnkStmtList.newTree(
+      nnkLetSection.newTree(
+        nnkIdentDefs.newTree(
+          newIdentNode("answer"),
+          newEmptyNode(),
+          nnkCall.newTree(
+            newIdentNode("outerjson_getInventory")
+          )
+        )
+      ),
+      nnkCommand.newTree(
+        nnkDotExpr.newTree(
+          newIdentNode("req`gensym2"),
+          newIdentNode("send")
+        ),
+        newIdentNode("answer")
+      )
+    )
+  )
+
+
 macro SERVER*(): untyped =
+  #
+  # server setup and start
+  #
   result = quote do:
     proc onRequest(req: Request): Future[void] =
       if req.httpMethod == some(HttpGet):
         case req.path.get()
         of "/":
-          let answer = outerjson_getInventory()
-          req.send(answer)
+          req.send(Http404)
         else:
           req.send(Http404)
+        echo "GET " & req.path.get()
     run(onRequest)
-
-
+  let getRef = result[0][6][0][0][1][0]
+  for (k, v) in getPlusPlusRouteDetails.mpairs:
+    getRef.insert(1, makeOfBranch(v.path))
+  # echo getRef.treeRepr
+  # echo getRef.astGenTree
+  echo result.toStrLit
+  # echo result.treeRepr
 
 #
 # LISTY THINGS
@@ -184,6 +241,6 @@ macro PATH*(content: untyped): untyped =
       let pathName = statement[0]
       let pathStringLiteral = statement[1]
       result.add quote do:
-        const `pathName` = `pathStringLiteral`
+        const `pathName`: RoutePath = `pathStringLiteral`
     else:
       error("ERROR: an ID statement list is in the form of name = \"string\" ")

@@ -2,12 +2,13 @@
 
 A web framework / generator for both the front HTML/JS and C backend API server.
 
-This is BOTH a tool and a library. They are designed to work together.
+This library is meant to be used with the `plusplus` command-line tool. They are
+designed to work together.
 
 ## Purpose
 
 The last thing the world needs is Yet Another Web Framework. And, yet, this one
-(as of June 2023) is somewhat different. It uses the cross compilation function
+(as of May 2023) is somewhat different. It uses the cross compilation function
 of nim to create:
 
 * a static website built from HTML/JS/CSS files acting as the web site front end
@@ -36,12 +37,18 @@ When this exact same code is seen by:
 
 Same code. Three behaviors. No need to worry about them calling each other correctly; the URLs will match, the JSON objects will match, the parameters will match.
 
-This web framework is designed to deployed in cloud environments such as AWS or with cloud-oriented tools like Kubernetes.
+This web framework is designed to deployed in cloud environments such as AWS, with cloud-oriented tools like Kubernetes, or with simpler arrangements like DockerCompose.
 
 ## Install
 
-Install via nimble:
+Install library via nimble:
 
 ```bash
 nimble install plusplus
+```
+
+Install the tool via nimble:
+
+```bash
+nimble install plusplustool
 ```
